@@ -17,7 +17,7 @@ struct Position {
 
 struct Server {
     out: Sender,
-    position: Rc<Cell<Position>>,
+    position: Position,
 }
 
 const STATE: Token = Token(1);
@@ -30,8 +30,7 @@ impl Handler for Server {
     fn on_timeout(&mut self, event: Token) -> Result<()> {
         match event {
             STATE => {
-                let p = self.position.get();
-                println!("Position: {}:{},{}", p.id, p.x, p.y);
+                let p = &mut self.position;
                 self.out.send(format!("{}:{},{}", p.id, p.x, p.y));
                 self.out.timeout(100, STATE)
             }
@@ -47,18 +46,23 @@ impl Handler for Server {
         let mut split = split.next().unwrap().split(',');
         let dx = split.next().unwrap().parse::<i32>().unwrap();
         let dy = split.next().unwrap().parse::<i32>().unwrap();
-        let mut p = self.position.get();
-        if p.id < command_id {
-            p.id = command_id;
-            p.x += dx;
-            p.y += dy;
-            self.position.set(p);
+        if self.position.id < command_id {
+            self.position.id = command_id;
+            self.position.x += dx;
+            self.position.y += dy;
         }
         Ok(())
     }
 }
 
 fn main() {
-    let position = Rc::new(Cell::new(Position { id: 0, x: 0, y: 0 }));
-    listen("127.0.0.1:3012", |out| { Server { out: out, position: position.clone() } }).unwrap();
+    // let position = Rc::new(Cell::new(Position { id: 0, x: 0, y: 0 }));
+    listen("127.0.0.1:3012", |out| { Server { 
+        out: out, 
+        position: Position { 
+            id: 0, 
+            x: 0, 
+            y: 0 
+        } 
+    } }).unwrap();
 } 
