@@ -1,0 +1,81 @@
+<html>
+<body>
+<canvas id="view" width="300" height="300"></canvas>
+<script>
+var ws = new WebSocket('ws://127.0.0.1:3012');
+var delta = [0, 0];
+var basePosition = [0, 0];
+var commandId = 0;
+var unacknowledgedCommands = [];
+
+var draw = function() {
+  var ctx = document.getElementById('view').getContext('2d');
+  ctx.clearRect(0, 0, 300, 300);
+  ctx.fillStyle = '#D40000';
+  var p = [basePosition[0], basePosition[1]];
+  unacknowledgedCommands.forEach(function(command) {
+    p[0] += command[1];
+    p[1] += command[2];
+  });
+  ctx.fillRect(p[0]*5, -p[1]*5, 50, 50);
+}
+window.requestAnimationFrame(draw);
+
+ws.onopen = function(e) {
+  console.log('connected');
+
+  setInterval(function() {
+    if (delta[0] != 0 || delta[1] != 0) {
+      unacknowledgedCommands.push([commandId, delta[0], delta[1]]);
+      ws.send(commandId + ":" + delta[0] + "," + delta[1]);
+      commandId += 1;
+      window.requestAnimationFrame(draw);
+    }
+  }, 100);
+};
+ws.onmessage = function(e) {
+  // console.log('msg from server: ' + e.data);
+  var tmp = e.data.split(':');
+  var commandId_ = parseInt(tmp[0]);
+  var position_ = tmp[1].split(',');
+  basePosition[0] = parseInt(position_[0]);
+  basePosition[1] = parseInt(position_[1]);
+  // console.log(basePosition);
+  while (unacknowledgedCommands.length > 0 && unacknowledgedCommands[0][0] <= commandId_) {
+    unacknowledgedCommands.shift();
+  }
+  window.requestAnimationFrame(draw);
+};
+
+document.onkeydown = function(e) {
+  switch (e.keyCode) {
+    case 37: // left
+      delta[0] = -1;
+    break;
+    case 38: // up
+      delta[1] = 1;
+    break;
+    case 39: // right
+      delta[0] = 1;
+    break;
+    case 40: // down
+      delta[1] = -1;
+    break;
+  }
+}
+
+document.onkeyup = function(e) {
+  switch (e.keyCode) {
+    case 37:
+    case 39:
+      delta[0] = 0;
+    break;
+    case 38:
+    case 40:
+      delta[1] = 0;
+    break;
+  }
+}
+</script>
+</body>
+</html>
