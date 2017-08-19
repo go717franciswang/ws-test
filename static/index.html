@@ -4,20 +4,29 @@
 <script>
 var ws = new WebSocket('ws://127.0.0.1:3012');
 var delta = [0, 0];
-var basePosition = [0, 0];
+var basePositions = [];
 var commandId = 0;
 var unacknowledgedCommands = [];
+var playerId;
 
 var draw = function() {
   var ctx = document.getElementById('view').getContext('2d');
   ctx.clearRect(0, 0, 300, 300);
-  ctx.fillStyle = '#D40000';
-  var p = [basePosition[0], basePosition[1]];
-  unacknowledgedCommands.forEach(function(command) {
-    p[0] += command[1];
-    p[1] += command[2];
+  ctx.save();
+
+  basePositions.forEach(function(basePosition) {
+    ctx.fillStyle = '#D40000';
+    var p = [basePosition.x, basePosition.y];
+
+    if (basePosition.playerId == playerId) {
+      unacknowledgedCommands.forEach(function(command) {
+        p[0] += command[1];
+        p[1] += command[2];
+      });
+    }
+    ctx.fillRect(p[0]*5, -p[1]*5, 50, 50);
+    ctx.restore();
   });
-  ctx.fillRect(p[0]*5, -p[1]*5, 50, 50);
 }
 window.requestAnimationFrame(draw);
 
@@ -34,15 +43,29 @@ ws.onopen = function(e) {
   }, 100);
 };
 ws.onmessage = function(e) {
-  // console.log('msg from server: ' + e.data);
-  var tmp = e.data.split(':');
-  var commandId_ = parseInt(tmp[0]);
-  var position_ = tmp[1].split(',');
-  basePosition[0] = parseInt(position_[0]);
-  basePosition[1] = parseInt(position_[1]);
-  // console.log(basePosition);
-  while (unacknowledgedCommands.length > 0 && unacknowledgedCommands[0][0] <= commandId_) {
-    unacknowledgedCommands.shift();
+  console.log('msg from server: ' + e.data);
+  if (e.data.startsWith('welcome:')) {
+    playerId = parseInt(e.data.split(':')[1]);
+  } else {
+    basePositions = [];
+    e.data.split('\n').forEach(function(tmp) {
+      var tmp = tmp.split(':');
+      var playerId_ = parseInt(tmp[0]);
+      var commandId_ = parseInt(tmp[1]);
+      var position_ = tmp[2].split(',');
+      basePositions.push({
+        playerId: playerId_,
+        commandId_: commandId_,
+        x: parseInt(position_[0]),
+        y: parseInt(position_[1]),
+      });
+
+      if (playerId_ == playerId) {
+        while (unacknowledgedCommands.length > 0 && unacknowledgedCommands[0][0] <= commandId_) {
+          unacknowledgedCommands.shift();
+        }
+      }
+    });
   }
   window.requestAnimationFrame(draw);
 };

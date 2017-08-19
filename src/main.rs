@@ -7,36 +7,40 @@ use ws::util::{Token, Timeout};
 use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::sync::{Mutex, Arc};
+use std::rc::Rc;
+use std::cell::Cell;
 
 #[derive(Debug, Copy, Clone)]
 struct Player {
     id: u32,
+    command_id: u32,
     x: i32,
     y: i32,
 }
 
 struct Server {
     out: Sender,
-    peer_addr: Option<SocketAddr>,
-    players: Arc<Mutex<HashMap<SocketAddr, Player>>>,
+    player_id: u32,
+    players: Arc<Mutex<HashMap<u32, Player>>>,
 }
 
 const STATE: Token = Token(1);
 
 impl Handler for Server {
     fn on_open(&mut self, hs: Handshake) -> Result<()> {
-        self.peer_addr = hs.peer_addr;
         let mut players = self.players.lock().unwrap();
-        players.insert(hs.peer_addr.unwrap(), Player { id: 0, x: 0, y: 0 });
+        players.insert(self.player_id, Player { id: self.player_id, command_id: 0, x: 0, y: 0 });
+        self.out.send(format!("welcome:{}", self.player_id));
         self.out.timeout(100, STATE)
     }
 
     fn on_timeout(&mut self, event: Token) -> Result<()> {
         match event {
             STATE => {
-                if let Some(p) = self.players.lock().unwrap().get(&self.peer_addr.unwrap()) {
-                    self.out.send(format!("{}:{},{}", p.id, p.x, p.y));
-                }
+                let msg = self.players.lock().unwrap().values()
+                    .map(|p| format!("{}:{}:{},{}", p.id, p.command_id, p.x, p.y))
+                    .collect::<Vec<String>>().join("\n");
+                self.out.send(msg);
                 self.out.timeout(100, STATE)
             }
             _ => Err(Error::new(ErrorKind::Internal, "Invalid token"))
@@ -52,9 +56,9 @@ impl Handler for Server {
         let dx = split.next().unwrap().parse::<i32>().unwrap();
         let dy = split.next().unwrap().parse::<i32>().unwrap();
         let mut players = self.players.lock().unwrap();
-        if let Some(player) = players.get_mut(&self.peer_addr.unwrap()) {
-            if player.id < command_id {
-                player.id = command_id;
+        if let Some(player) = players.get_mut(&self.player_id) {
+            if player.command_id < command_id {
+                player.command_id = command_id;
                 player.x += dx;
                 player.y += dy;
             }
@@ -64,10 +68,16 @@ impl Handler for Server {
 }
 
 fn main() {
-    let mut players: Arc<Mutex<HashMap<SocketAddr, Player>>> = Arc::new(Mutex::new(HashMap::new()));
-    listen("127.0.0.1:3012", |out| { Server { 
-        out: out, 
-        players: players.clone(),
-        peer_addr: None,
-    } }).unwrap();
+    let mut players: Arc<Mutex<HashMap<u32, Player>>> = Arc::new(Mutex::new(HashMap::new()));
+    let mut new_player_id = Rc::new(Cell::new(0_u32));
+    listen("127.0.0.1:3012", |out| {
+        let new_player_id = new_player_id.clone();
+        let player_id = new_player_id.get();
+        new_player_id.set(player_id + 1);
+        Server { 
+            out: out, 
+            players: players.clone(),
+            player_id: player_id,
+        } 
+    }).unwrap();
 } 
