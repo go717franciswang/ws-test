@@ -65,6 +65,10 @@ impl Handler for Server {
         }
         Ok(())
     }
+
+    fn on_close(&mut self, _code: CloseCode, reason: &str) {
+        self.players.lock().unwrap().remove(&self.player_id).unwrap();
+    }
 }
 
 fn main() {
