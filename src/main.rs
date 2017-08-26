@@ -89,13 +89,19 @@ fn main() {
     let players: Arc<Mutex<HashMap<u32, Player>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let (sender, receiver) = channel::<Move>();
-    // sender.send(expensive_computation()).unwrap();
     let frame_ms = time::Duration::from_millis(20);
     let engine_players = players.clone();
     thread::spawn(move|| {
         loop {
-            while let Ok(m) = receiver.try_recv() {
+            while let Ok(mut m) = receiver.try_recv() {
                 let mut players = engine_players.lock().unwrap();
+                //TODO: implement bound_move
+                bound_move(&players, &mut m);
+                if m.x == 0 && m.y == 0 {
+                    continue;
+                }
+
+                //TODO: 
                 if let Some(player) = players.get_mut(&m.player_id) {
                     if player.command_id < m.command_id {
                         player.command_id = m.command_id;
