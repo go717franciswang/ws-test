@@ -1,14 +1,21 @@
 // A WebSocket echo server
 
 extern crate ws;
+extern crate nalgebra as na;
+extern crate ncollide;
 
 use ws::{listen, Handler, Sender, Result, Message, Handshake, CloseCode, Error, ErrorKind};
 use ws::util::{Token, Timeout};
-use std::net::SocketAddr;
 use std::collections::HashMap;
 use std::sync::{Mutex, Arc};
 use std::rc::Rc;
 use std::cell::Cell;
+use na::{Isometry2, Vector2};
+use ncollide::shape::{Cuboid, Ball};
+use ncollide::query;
+use std::sync::mpsc::{channel, self};
+use std::thread;
+use std::time;
 
 #[derive(Debug, Copy, Clone)]
 struct Player {
@@ -18,19 +25,28 @@ struct Player {
     y: i32,
 }
 
+#[derive(Copy, Clone)]
+struct Move {
+    player_id: u32,
+    command_id: u32,
+    dx: i32,
+    dy: i32,
+}
+
 struct Server {
     out: Sender,
     player_id: u32,
     players: Arc<Mutex<HashMap<u32, Player>>>,
+    sender: mpsc::Sender<Move>,
 }
 
 const STATE: Token = Token(1);
 
 impl Handler for Server {
-    fn on_open(&mut self, hs: Handshake) -> Result<()> {
+    fn on_open(&mut self, _hs: Handshake) -> Result<()> {
         let mut players = self.players.lock().unwrap();
         players.insert(self.player_id, Player { id: self.player_id, command_id: 0, x: 0, y: 0 });
-        self.out.send(format!("welcome:{}", self.player_id));
+        self.out.send(format!("welcome:{}", self.player_id)).unwrap();
         self.out.timeout(100, STATE)
     }
 
@@ -40,7 +56,7 @@ impl Handler for Server {
                 let msg = self.players.lock().unwrap().values()
                     .map(|p| format!("{}:{}:{},{}", p.id, p.command_id, p.x, p.y))
                     .collect::<Vec<String>>().join("\n");
-                self.out.send(msg);
+                self.out.send(msg).unwrap();
                 self.out.timeout(100, STATE)
             }
             _ => Err(Error::new(ErrorKind::Internal, "Invalid token"))
@@ -55,25 +71,45 @@ impl Handler for Server {
         let mut split = split.next().unwrap().split(',');
         let dx = split.next().unwrap().parse::<i32>().unwrap();
         let dy = split.next().unwrap().parse::<i32>().unwrap();
-        let mut players = self.players.lock().unwrap();
-        if let Some(player) = players.get_mut(&self.player_id) {
-            if player.command_id < command_id {
-                player.command_id = command_id;
-                player.x += dx;
-                player.y += dy;
-            }
-        }
+        self.sender.send(Move {
+            player_id: self.player_id,
+            command_id: command_id,
+            dx: dx,
+            dy: dy,
+        }).unwrap();
         Ok(())
     }
 
-    fn on_close(&mut self, _code: CloseCode, reason: &str) {
+    fn on_close(&mut self, _code: CloseCode, _reason: &str) {
         self.players.lock().unwrap().remove(&self.player_id).unwrap();
     }
 }
 
 fn main() {
-    let mut players: Arc<Mutex<HashMap<u32, Player>>> = Arc::new(Mutex::new(HashMap::new()));
-    let mut new_player_id = Rc::new(Cell::new(0_u32));
+    let players: Arc<Mutex<HashMap<u32, Player>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    let (sender, receiver) = channel::<Move>();
+    // sender.send(expensive_computation()).unwrap();
+    let frame_ms = time::Duration::from_millis(20);
+    let engine_players = players.clone();
+    thread::spawn(move|| {
+        loop {
+            while let Ok(m) = receiver.try_recv() {
+                let mut players = engine_players.lock().unwrap();
+                if let Some(player) = players.get_mut(&m.player_id) {
+                    if player.command_id < m.command_id {
+                        player.command_id = m.command_id;
+                        player.x += m.dx;
+                        player.y += m.dy;
+                    }
+                }
+            }
+            
+            thread::sleep(frame_ms);
+        }
+    });
+
+    let new_player_id = Rc::new(Cell::new(0_u32));
     listen("127.0.0.1:3012", |out| {
         let new_player_id = new_player_id.clone();
         let player_id = new_player_id.get();
@@ -82,6 +118,7 @@ fn main() {
             out: out, 
             players: players.clone(),
             player_id: player_id,
+            sender: sender.clone(),
         } 
     }).unwrap();
 } 

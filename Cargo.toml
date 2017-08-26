@@ -5,3 +5,5 @@ authors = ["Francis Wang <francis@yieldnexus.com>"]
 
 [dependencies]
 ws = "*"
+ncollide = "*"
+nalgebra = "*"
