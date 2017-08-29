@@ -85,6 +85,25 @@ impl Handler for Server {
     }
 }
 
+fn bound_move(players: &HashMap<u32, Player>, m: &mut Move) {
+    if let Some(player) = players.get(&m.player_id) {
+        for p in players.values() {
+            if p.id == player.id {
+                continue;
+            }
+
+            let x = player.x + m.dx;
+            let y = player.y + m.dy;
+            if (x - p.x).abs() < 10 && (player.y - p.y).abs() < 10 {
+                m.dx = 0;
+            }
+            if (player.x - p.x).abs() < 10 && (y - p.y).abs() < 10 {
+                m.dy = 0;
+            }
+        }
+    }
+}
+
 fn main() {
     let players: Arc<Mutex<HashMap<u32, Player>>> = Arc::new(Mutex::new(HashMap::new()));
 
@@ -95,13 +114,8 @@ fn main() {
         loop {
             while let Ok(mut m) = receiver.try_recv() {
                 let mut players = engine_players.lock().unwrap();
-                //TODO: implement bound_move
                 bound_move(&players, &mut m);
-                if m.x == 0 && m.y == 0 {
-                    continue;
-                }
 
-                //TODO: 
                 if let Some(player) = players.get_mut(&m.player_id) {
                     if player.command_id < m.command_id {
                         player.command_id = m.command_id;
